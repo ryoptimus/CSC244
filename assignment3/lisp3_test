@@ -1,0 +1,12 @@
+(load "rnovoa_src.lisp")
+
+(bw-agent)
+
+;; Test cases
+(format t "~%TEST CASES FOR SUPPORT-CHAIN FUNCTION~%")
+(format t "Support chain for A to C~%")
+(format t "Expected: (A B C)~%")
+(format t "Generated: ~a~%~%" (support-chain 'A 'C))
+(format t "Support chain for *TABLE* to H~%")
+(format t "Expected: (*TABLE* A B C H)~%")
+(format t "Generated: ~a~%" (support-chain '*TABLE* 'H))
