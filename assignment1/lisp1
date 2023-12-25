@@ -1,1 +1,60 @@
+;Initialize *blocks* list.
+(defvar *blocks* '((CUBE A) (CUBE B) (CUBE C) (CUBE D) (BAR G) (BAR H) (VERTICAL G) (HORIZONTAL H)))
 
+;Initialize empty *facts-ht* hashtable.
+(defvar *facts-ht* (make-hash-table :test #'equal))
+
+;Function 'store-fact':
+(defun store-fact (fact ht)
+  ;First and foremost, map the complete fact to the value T ("true").
+  (setf (gethash fact ht) 'T)
+  ;Check if a linked list exists in the hashtable for the fact keyword (ON, NEAR, etc.)
+  (if (gethash (car fact) ht)
+      ;If true, append the hashtable value with the fact as a list.
+      (setf (gethash (car fact) ht) (append (gethash (car fact) ht) (list fact)))
+      ;If false, map a new key-value pair with the fact as a list.
+      (setf (gethash (car fact) ht) (list fact))))
+
+;Function 'remove-fact':
+(defun remove-fact (fact ht)
+  ;First, remove the full fact from the hashtable by setting it to nil.
+  (setf (gethash fact ht) nil)
+  ;Second, remove the full fact from the list found at the hashtable key by its keyword (ON, NEAR, etc.)
+  (setf (gethash (car fact) ht) (remove fact (gethash (car fact) ht) :test #'equal)))
+
+;Function 'store-facts':
+(defun store-facts (facts ht)
+  ;For every member of list 'facts,' run store-fact function.
+  (mapcar (lambda(x) (store-fact x ht)) facts))
+
+(princ "Running 'store-facts'...")
+(store-facts '((CUBE A) (CUBE B) (CUBE C) (CUBE D) (BAR G) (BAR H) (VERTICAL G) (HORIZONTAL H)) *facts-ht*)
+(store-facts '((ON G *TABLE*) (ON A *TABLE*) (NEAR A G) (ON B A) (ON C B) (ON H C)) *facts-ht*)
+(princ " complete.")
+(terpri)
+(terpri)
+(princ "Cube facts: ")
+(print (gethash 'CUBE *facts-ht*))
+(terpri)
+(terpri)
+(princ "Bar facts: ")
+(print (gethash 'BAR *facts-ht*))
+(terpri)
+(terpri)
+(princ "Printing listed values for key 'ON' in *facts-ht*:")
+(print (gethash 'ON *facts-ht*))
+(terpri)
+(terpri)
+(princ "Printing listed values for key 'NEAR' in *facts-ht*:")
+(print (gethash 'NEAR *facts-ht*))
+(terpri)
+(terpri)
+(princ "Removing fact (ON C B) from *facts-ht*...")
+(remove-fact '(ON C B) *facts-ht*)
+(princ " complete.")
+(terpri)
+(terpri)
+(princ "Printing listed values for key 'ON' in *facts-ht* with (ON C B) removed: ")
+(print (gethash 'ON *facts-ht*))
+(terpri)
+(terpri)
