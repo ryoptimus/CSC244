@@ -1,0 +1,474 @@
+;------------------------------------------------Some helper data structure---------------------------------------------------;
+;From tzhou_src.lisp
+(defparameter *BLOCKS* '((CUBE A) (CUBE B) (CUBE C) (CUBE D) (CUBE E) (CUBE F) (BAR G) (BAR H) (HORIZONTAL G) (HORIZONTAL H)))
+;; Some helper data structure
+(defparameter *height* (make-hash-table :test #'equal)); height HT
+(defparameter *relation* (make-hash-table :test #'equal)); special relation HT for ON.
+(defparameter *facts-ht* (make-hash-table :test #'equal))
+;------------------------------------------------Some helper function---------------------------------------------------;
+(defun initialize-height ()
+    (clrhash *height*)
+    (dolist (block *BLOCKS*)
+        (setf (gethash (second block) *height*) 1)
+    ); initialize all block height to 1
+    (setf (gethash '*TABLE* *height*) 1)
+)
+;Check if given block is a bar (to operate turn vertical)
+(defun check-if-bar (block)
+  (let ((entry (find block *BLOCKS* :key #'second :test #'equal)))
+    (and entry (eq (car entry) 'BAR))))
+;Concatenate-symbols 
+(defun concatenate-symbols (&rest symbols)
+  (intern (apply #'concatenate 
+                 (cons 'string 
+                       (mapcar #'symbol-name symbols)))))
+(defun third-element-is (sublist elem)
+  (and (listp sublist) 
+       (>= (length sublist) 3) 
+       (eq (third sublist) elem)))
+; Sort the table actions
+(defun sort-actions (actions)
+  (let ((start-action (find-if (lambda (action) (eq (third action) '*TABLE*)) actions))
+        (sorted-list '())
+        (current-blocks nil)
+        (processed-blocks nil))
+    ;; Add the initial action and set the current blocks
+    (push start-action sorted-list)
+    (setf current-blocks (list (second start-action)))
+
+    ;; Use LOOP for the iteration
+    (loop while current-blocks do
+      (let ((block (pop current-blocks)))
+        (unless (member block processed-blocks)
+          (push block processed-blocks)
+          
+          ;; Find NEXT-TO actions related to this block and add them
+          (dolist (next-to-action (remove-if-not (lambda (action) (and (eq (third action) block) (string= (first action) 'PUT-NEXT-TO))) actions))
+            (push next-to-action sorted-list)
+            (push (second next-to-action) current-blocks))
+          
+          ;; Find NEAR actions related to this block and add them
+          (dolist (near-action (remove-if-not (lambda (action) (and (eq (third action) block) (string= (first action) 'PUT-NEAR))) actions))
+            (push near-action sorted-list)
+            (push (second near-action) current-blocks)))))
+
+    (reverse sorted-list)))
+
+;-------------------------------------------------------FUNCTION FROM LISP1-------------------------------------------------------;
+(defun store-fact (fact ht)
+  (let* ((key (first fact))
+        (current-facts (gethash key ht)))
+    (setf (gethash key ht) (remove-duplicates (append current-facts (list fact)) :test #'equal))) ; add fact to list using first as key
+    (setf (gethash fact ht) t) ;T for complete predicate
+)
+
+;; remove fact from hashtable
+(defun remove-fact  (fact ht)
+    (let* ((key (first fact))
+           (current-facts (gethash key ht)))
+        (setf (gethash key ht) (remove fact current-facts :test #'equal)))
+    (setf (gethash fact ht) nil)
+)
+; Task 2
+;;Store a list of facts in the hash table
+(defun store-facts (facts ht)
+  (mapc (lambda (fact) (store-fact fact ht)) facts)); Using mapping function
+;-------------------------------------------------------START TASK 1-5-------------------------------------------------------;
+;Task 0
+(defparameter *blocks-at-level-i* (make-array 12 :initial-element nil)); 1-d array
+;; Initialize *blocks-at-level-i*
+(defun initialize-level ()
+    (fill *blocks-at-level-i* nil)   
+    (setf (aref *blocks-at-level-i* 0) '(*TABLE*))
+)
+(defparameter *supports* (make-hash-table :test #'equal)); support HT
+;Task 1
+(defun find-supports (specific-struc-descr)
+    ;; Clearing the supports table first
+    (clrhash *supports*)
+    (initialize-height)
+  ;; Helper function to add supports to the hash table
+    (labels ((update-supports (block supported-by supports)
+                (let ((existing-entry (gethash block *supports*)))
+                    (setf (gethash block *supports*)
+                            (if existing-entry
+                                (list (union (first existing-entry) supported-by) (union (second existing-entry) supports))
+                                (list supported-by supports)
+                            )
+                    )
+                )
+            ))
+    ;; Iterate over each relation in the description
+    (dolist (relation specific-struc-descr)
+        (let ((action (first relation))
+                (block1 (second relation))
+                (block2 (third relation)))
+            (cond
+            ;ON
+                ((equal action 'ON)
+                    (update-supports block1 (list block2) '())
+                    (update-supports block2 '() (list block1))
+                )
+                        
+                ((or (equal action 'ON-1) (equal action 'ON-2) (equal action 'ON+1) (equal action 'ON+2))
+                    (update-supports block1 (list block2) '())
+                    (update-supports block2 '() (list block1))
+                    (setf (gethash (list block1 block2) *relation*) action)
+                )
+
+            ;NEAR / NEXT-TO
+                ((or (equal action 'NEAR) (equal action 'NEXT-TO))
+                    (update-supports block1 '(*TABLE*) '())
+                    (update-supports '*table* '() (list block1))
+                    (setf (gethash block1 *relation*) (list action block1 block2))
+                )
+                
+                ;TURN-VERTICAL
+                ((equal action 'VERTICAL)
+                ;Check if block is a bar
+                (if (check-if-bar block1)
+                    (let ((height (gethash block1 *height*)))
+                        (if (= height 3)
+                            (setf (gethash block1 *height*) 1)
+                            (setf (gethash block1 *height*) 3)))
+                    (error "cannot turn a non-bar cube: ~a" block1))
+                )
+
+            ;; If not known relation, throw error
+            ;(t (error "unknown relation: ~a" action))
+            )
+        )
+    )
+    ;; Check for unsupported blocks
+    (maphash (lambda (block entry)
+               (when (and (not (equal block '*TABLE*))
+                          (null (first entry)))
+                 (error "Block ~A is unsupported!" block)))
+             *supports*))
+); end of find-supports
+
+
+;Task 2
+(defun find-layers (specific-struc-descr)
+    ;; Clear and update the hashtable
+    (initialize-level)
+    (find-supports specific-struc-descr)
+    ;; For each level in the *BLOCKS-AT-LEVEL-I* array...
+    (let ((output-list '()))
+        (loop for i from 0 to 11 do
+            (let ((cur_blocks (aref *blocks-at-level-i* i)))
+                ;(print cur_blocks)
+                (if cur_blocks ; if there exists block at level i
+                    (let ((cur_layer '()))
+                        (dolist (block cur_blocks)
+                            (let ((support_list (second (gethash block *supports*))))
+                                (if support_list ;If the selected block supports any other block
+                                    (progn 
+                                        ;(print support_list)
+                                        (dolist (support support_list)
+                                            (let* ((height (gethash support *height*))
+                                                    (temp_list (aref *blocks-at-level-i* (+ i height))))
+                                                (setf (aref *blocks-at-level-i* (+ i height)) (remove-duplicates (append temp_list (list support))))
+                                                (setf cur_layer (append (list support) cur_layer))
+                                            )
+                                        )    
+                                    )
+                                )
+                            )
+                        )
+                        (if cur_layer
+                            (progn
+                                (push (cons i (remove-duplicates (reverse cur_layer) :test #'equal)) output-list)
+                            )
+                        )
+                    )
+                ) 
+            )
+        ); end of loop
+    (reverse output-list)
+    )
+); end of find-layers
+
+;Task 3
+(defun find-steps (specific-struc-descr)
+    ;Do some initialization
+    (clrhash *relation*)
+    (let ((layer_list (find-layers specific-struc-descr))
+          (output-list '()))
+        (dolist (layer layer_list) ;For every layer in layer-list
+            (let* ( (level (first layer))
+                    (layer_blocks (rest layer))
+                    (level_blocks (aref *blocks-at-level-i* level)))
+            
+                (dolist (layer_block layer_blocks) ;For every block in one layer
+                    (let ((support_list (first (gethash layer_block *supports*))))
+
+                        (dolist (support_block support_list)
+                            (if (member support_block level_blocks)
+                                (if (gethash (list layer_block support_block) *relation*) ;If there exists a special relation
+                                    (push (list (concatenate-symbols 'PUT- (gethash (list layer_block support_block) *relation*)) layer_block support_block) output-list);exist relation
+                                    (push (list 'PUT-ON layer_block support_block) output-list);doesn't exist relation
+                                )
+                            )
+                        )
+                    )
+                )    
+            )
+            
+        )
+        ;(print output-list)
+        ; Now output-list is full of put-on, swapping some with special relations (NEAR/NEXT-TO)
+        (let ((table-list (remove-if-not (lambda (sublist) (third-element-is sublist '*TABLE*)) output-list))
+              (non-table-list (remove-if (lambda (sublist) (third-element-is sublist '*TABLE*)) output-list))
+              ;(original_block '())
+              (updated-list '())
+              (relation-list '())
+              )
+            
+            ; Iterate through table-list (layer 0 blocks), swap if find special relations
+            (dolist (action non-table-list)
+                (push action updated-list)
+            )
+            (dolist (action table-list) ;Iterate through on table blocks-> follow rule: PUT-ON then NEAR/NEXT
+                ;; action is a list in form(PUT-ON X Y)
+                (if (gethash (second action) *relation*)
+                    (push (push (concatenate-symbols 'PUT- (first (gethash (second action) *relation*))) (rest (gethash (second action) *relation*))) relation-list);If contain special relation-->Swap
+                    (push action relation-list);If doesn't contain special relation->push original action
+                )
+            )
+            (dolist (action (reverse (sort-actions relation-list)))
+                (push action updated-list)
+            )
+
+            ; Finally add TURN-VERTICAL action if any bar needs to be vertical
+            (dolist (block *blocks*)
+                (if (or (equal (first block) 'BAR) (equal (first block) 'CUBE))
+                    (if (equal (gethash (second block) *height*) 3)
+                        (push (list (concatenate-symbols 'TURN-VERTICAL) (second block)) updated-list)
+                    )    
+                )  
+            )
+            ;Return the final result 
+            updated-list
+        )
+    )
+); end of find-step
+
+
+
+;Task 4
+; Sample input: (ON ?X table) (ON ?Y ?X)
+; Sample input: (CUBE ?X) (CUBE ?Y)
+
+;; find-required-blocks and particularize-description
+(defun find-required-blocks (goal-descr)
+  (let ((bindings '())  ; The list that will hold our bindings
+        (assigned '())  ; List to track assigned blocks
+        )
+    (loop for spec in goal-descr do
+          (let* ((value (second spec))
+                 (block-type (first spec)))
+            (if (member block-type '(CUBE BAR) :test #'equal) ; Check if block-type is "CUBE" or "BAR"
+                (let ((block (find-if (lambda (blk) (not (member blk assigned :test #'equal)))
+                                      (gethash block-type *facts-ht*)))) ; Find the first unassigned block of the desired type
+                  (if block
+                      (progn
+                        (push block assigned) ; Mark block as assigned
+                        (push (list value (second block)) bindings)) ; Add to bindings
+                    (error "Not enough blocks of type ~a available" block-type)))
+              ;; Else: Handle other block-types as needed
+		)))
+    (reverse bindings)));End of find-required-blocks
+
+
+
+(defun find-required-blocks-2 (goal-descr)
+    (let ((bindings '())  ; The list that will hold our bindings
+          (assigned '())  ; List to track assigned blocks
+          (all-vars (remove-duplicates (mapcar #'second goal-descr))) ; List to track all encountered variables
+          (bar-vars (mapcan (lambda (spec) (if (equal (first spec) 'BAR) (list (second spec)) nil)) goal-descr))) ; List to track variables assigned to BAR
+          
+        ;; First, handle BARs
+        (dolist (var bar-vars)
+            (let ((block (find-if (lambda (blk) (not (member blk assigned :test #'equal)))
+                                  (gethash 'BAR *facts-ht*))))
+              (unless block
+                  (error "Not enough blocks of type BAR available"))
+              (push block assigned)
+              (push (list var (second block)) bindings)
+              (setf all-vars (remove var all-vars))))
+
+        ;; Then, handle CUBEs
+        (dolist (var all-vars)
+            (let ((block (find-if (lambda (blk) (not (member blk assigned :test #'equal)))
+                                  (gethash 'CUBE *facts-ht*))))
+              (unless block
+                  (error "Not enough blocks of type CUBE available"))
+              (push block assigned)
+              (push (list var (second block)) bindings)))
+        
+        (reverse bindings))) ; Return the bindings
+
+
+
+(defun particularize-description (struc-descr binding-list)
+  (let ((part-descr struc-descr))
+    (loop for (var block) in binding-list do
+          (setf part-descr (subst block var part-descr)))
+    part-descr)
+  )
+
+(defun print-part-description (struc-descr binding-list)
+   (let ((part-descr struc-descr))
+    (loop for (var block) in binding-list do
+          (setf part-descr (subst block var part-descr)))
+    (format t "Particularized description: ~a~%" part-descr)
+    (store-facts part-descr *facts-ht*)
+    part-descr))
+
+(defun build-and-print-goal-structure (nonspecific-struc-descr)
+    (format t "Bindings: ~A~%" (find-required-blocks-2 nonspecific-struc-descr))
+    ;(print (find-required-blocks nonspecific-struc-descr))
+    (format t "Steps: ~a~%" (find-steps (particularize-description nonspecific-struc-descr (find-required-blocks-2 nonspecific-struc-descr))))
+    (print-part-description nonspecific-struc-descr (find-required-blocks-2 nonspecific-struc-descr))
+)
+
+;; Test framework
+(defun report-result (counter x y)
+    (if (equal x y)
+      (progn (format t "  - test case #~a: [SUCCESS] <output: ~a>~&" counter y) t)
+      (progn (format t "  - test case #~a: [FAILURE] <expected: ~#a, actual: ~#a>~&" counter x y) nil)))
+
+;Printing function (type: hashtable)
+(defun print-hash-table (ht)
+  (format t "Hash table contents:~%")
+  (maphash #'(lambda (key value)
+               (format t "~a => ~a~%" key value))
+           ht))
+
+;Printing function (type: array)
+(defun print-array (arr)
+  (format t "Array contents: ")
+  (loop for element across arr
+        do (format t "~a " element))
+  (format t "~%"))
+
+;END tzhou FILE
+
+;Spatial query parser calls relevant functions for each case
+(defun spatial-query-parser (query)
+  (cond ((string= (car query) "HORIZONTAL") (vh-checker query))
+        ((string= (car query) "VERTICAL") (vh-checker query))
+	((string= (car query) "ON") (on-checker query))
+	((string= (car query) "SUPPORTS") (supports-checker query))
+	((string= (car query) "HELPS-SUPPORT") (helps-support-checker query))))
+
+;VERTICAL/HORIZONTAL checker
+(defun vh-checker (query)
+  (let ((direction (car query))
+        (variable (cadr query)))
+    (if (gethash query *facts-ht*)
+        (format t "Yes, block ~a is ~a.~%" variable direction)
+        (format t "No, block ~a is not ~a.~%" variable direction))))
+
+;ON checker
+(defun on-checker (query)
+  (if (gethash query *facts-ht*)
+      (format t "Yes, block ~a is ON block ~a.~%" (cadr query) (caddr query))
+      (format t "No, block ~a is NOT ON block ~a.~%" (cadr query) (caddr query))))
+
+;SUPPORTS checker
+(defun supports-checker (query)
+  (let ((supporting (second (gethash (cadr query) *supports*))))
+    (if (member (caddr query) supporting)
+	(if (string= (cadr query) "*TABLE*")
+	    (format t "Yes, *TABLE* supports block ~a.~%" (caddr query))
+	    (format t "Yes, block ~a SUPPORTS block ~a.~%" (cadr query) (caddr query)))
+	(format t "No, block ~a does NOT SUPPORT block ~a.~%" (cadr query) (caddr query)))))
+
+;HELPS-SUPPORT checker
+(defun helps-support-checker (query)
+  (let ((supports '())
+	(supported-by (first (gethash (caddr query) *supports*))))
+    (loop
+	  :while supported-by
+	  :do
+	  (setf supports (append supports supported-by))
+	  (dolist (element supported-by)
+	    (setf supported-by (first (gethash element *supports*)))
+	    (setf supports (append supports supported-by))))
+
+    (if (member (cadr query) supports)
+	(format t "Yes, block ~a HELPS SUPPORT block ~a.~%" (cadr query) (caddr query))
+	(format t "No, block ~a does NOT HELP SUPPORT block ~a.~%" (cadr query) (caddr query))))
+    
+  )
+
+;TASK 1
+(defun bw-agent ()
+  ; Reset hashtables *facts-ht* and *supports*, as well as *blocks-at-level-i* array
+  (setf *facts-ht* (make-hash-table :test #'equal))
+  (setf *supports* (make-hash-table :test #'equal))
+  (setf *blocks-at-level-i* (make-array 12 :initial-element nil))
+  (store-facts '((CUBE A) (CUBE B) (CUBE C) (CUBE D) (BAR G) (BAR H)) *facts-ht*)
+  (let ((user-input nil)
+	(user-confirmation nil))
+    (loop
+	  :while (or (not user-input) (not (char= (char user-confirmation 0) #\Y)))
+	  :do
+	  (format t "What would you like me to build? ")
+	  (force-output)
+	  (setf user-input (read-line))
+	  (format t "~%You entered: ~a~%" user-input)
+	  (force-output)
+	  (format t "~%Confirm goal structure description (Y/N): ")
+	  (force-output)
+	  (setf user-confirmation (read-line))
+	  (format t "~%"))
+    (format t "User input confirmed.~%~%")
+    (format t "Goal structure description: ~a~%" user-input)
+
+    ; Parse user input into a list
+    (let ((parsed-input (read-from-string user-input)))
+      ;(format t "Parsed input as a list: ~a~%" parsed-input)
+      
+      (build-and-print-goal-structure parsed-input)
+      ;(print-hash-table *facts-ht*)
+      ;(print-hash-table *supports*)
+      ;(print-array *blocks-at-level-i*)
+      (format t "~%")
+      
+      (let ((user-input2 nil))
+	(loop
+	      :while (not (string= (string-upcase (string-trim " " user-input2)) "NO"))
+	      :do
+	      (format t "Do you have a spatial question? ")
+	      (force-output)
+	      (setf user-input2 (read-line))
+	      ;; Check if the input is "NO"
+	      (when (string= (string-upcase (string-trim " " user-input2)) "NO")
+		(format t "Terminating the loop.~%")
+		(return))
+	      
+	      ;; Read the input as a list
+	      (let ((parsed-input (ignore-errors (read-from-string user-input2))))
+		(if (and parsed-input (listp parsed-input))
+		    (spatial-query-parser parsed-input)
+		    (format t "Invalid input. Please enter 'NO' or a valid list.~%"))))
+      )
+    )
+    )
+  )
+
+;TASK 2
+;Recursive helper function
+(defun find-support-chain (block current-chain y)
+  (if (eq block y)
+      (nreverse (cons y current-chain))
+      (let ((supports (gethash block *supports*)))
+        (if supports
+            (loop for supported in (second supports)
+                  thereis (find-support-chain supported (cons block current-chain) y))))))
+
+(defun support-chain (x y)
+  (find-support-chain x nil y))
